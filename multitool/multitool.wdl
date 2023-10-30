@@ -3,14 +3,14 @@ version 1.0
 workflow MultitoolWorkflow {
   input {
     Array[File] file_manifest
-    File python_script
+    String python_script_url
     String docker_image = "python:3.18-bullseye"
   }
 
   call MultitoolTask {
     input:
       file_manifest=file_manifest,
-      python_script=python_script,
+      python_script_url=python_script_url,
       docker_image=docker_image
   }
 
@@ -22,7 +22,7 @@ workflow MultitoolWorkflow {
 task MultitoolTask {
   input {
     Array[File] file_manifest
-    File python_script
+    String python_script_url
     String docker_image = "python:3.18-bullseye"
   }
 
@@ -35,7 +35,8 @@ task MultitoolTask {
         echo "$(ls -la $manifest_filename)"
     done
 
-    python "~{python_script}"
+    wget "~{python_script_url}"
+    python $(basename "~{python_script_url}")
   >>>
 
   output {

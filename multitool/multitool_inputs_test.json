@@ -1,0 +1,10 @@
+{
+    "MultitoolWorkflow.file_manifest": [
+        "https://raw.githubusercontent.com/broadinstitute/cromwell/develop/scripts/reference_disks/create_images.sh"
+    ],
+    "MultitoolWorkflow.python_script": "https://gist.github.com/gileshall/7742cc79f089c1b85bf43a9ae0528d76/raw/3e3bf512a38e08e97289573df5b6b186609798bb/multitool.py",
+    "MultitoolWorkflow.docker_image": "python:3.8-bullseye"
+}
+
+
+

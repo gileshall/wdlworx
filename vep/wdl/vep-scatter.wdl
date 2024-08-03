@@ -48,13 +48,11 @@ task split_vcf {
 
   command <<<
     apt-get update && apt-get install -y bcftools
-    pip install pysam
     python3 <<CODE
 import os
 import subprocess
 import multiprocessing
 from multiprocessing import Pool
-import pysam
 
 def count_variants(vcf_file):
     view_proc = subprocess.Popen(['bcftools', 'view', '-H', vcf_file], stdout=subprocess.PIPE)
@@ -63,16 +61,24 @@ def count_variants(vcf_file):
     assert wc_proc.returncode == 0
     return int(wc_proc.stdout.read().decode().strip())
 
+def get_vcf_header(vcf_file):
+    view_proc = subprocess.Popen(['bcftools', 'view', '-h', vcf_file], stdout=subprocess.PIPE)
+    header, _ = view_proc.communicate()
+    assert view_proc.returncode == 0
+    return header.decode()
+
 def split_vcf(args):
-    vcf_file, output_dir, output_prefix, split_idx, split_size, vcf_extension = args
+    vcf_file, output_dir, output_prefix, split_idx, split_size, vcf_extension, header = args
     split_filename = f'{output_dir}/{output_prefix}-{split_idx:04d}.{vcf_extension}'
-    with pysam.VariantFile(vcf_file) as vcf_in:
-        with pysam.VariantFile(split_filename, 'w', header=vcf_in.header) as vcf_out:
-            for i, rec in enumerate(vcf_in):
-                if i >= split_idx * split_size and i < (split_idx + 1) * split_size:
-                    vcf_out.write(rec)
-                if i >= (split_idx + 1) * split_size:
-                    break
+
+    start = split_idx * split_size + 1
+    end = (split_idx + 1) * split_size
+
+    with open(split_filename, 'wb') as out_f:
+        out_f.write(header.encode())
+        view_proc = subprocess.Popen(['bcftools', 'view', '-H', vcf_file], stdout=subprocess.PIPE)
+        awk_proc = subprocess.Popen(['awk', '-v', f'start={start}', '-v', f'end={end}', 'NR>=start&&NR<=end'], stdin=view_proc.stdout, stdout=out_f)
+        awk_proc.wait()
 
 def distribute_items(total_items, num_buckets):
     min_items_per_bucket = total_items // num_buckets
@@ -96,9 +102,10 @@ vcf_extension = 'vcf.gz' if vcf_file.endswith('.gz') else 'vcf'
 output_prefix = output_prefix if output_prefix else os.path.basename(vcf_file).replace('.vcf', '').replace('.gz', '').replace('.bz2', '')
 
 num_variants = count_variants(vcf_file)
+header = get_vcf_header(vcf_file)
 split_sizes = distribute_items(num_variants, num_splits)
 
-pool_args = [(vcf_file, output_dir, output_prefix, idx, split_size, vcf_extension) for (idx, split_size) in enumerate(split_sizes)]
+pool_args = [(vcf_file, output_dir, output_prefix, idx, split_size, vcf_extension, header) for (idx, split_size) in enumerate(split_sizes)]
 
 with Pool(multiprocessing.cpu_count()) as pool:
     pool.map(split_vcf, pool_args)

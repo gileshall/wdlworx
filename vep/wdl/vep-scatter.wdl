@@ -1,10 +1,16 @@
 version 1.0
 
-workflow scatter_vcf {
+workflow VariantEffectPredictorWorkflowScatter {
   input {
     File vcf
     Int num_splits
   }
+
+  # Remove .vcf, .vcf.gz, or .vcf.bz2 from the filename
+  String base_name = basename(vcf)
+  String name_without_gz = sub(base_name, "\\.vcf\\.gz$", "")
+  String name_without_bz2 = sub(name_without_gz, "\\.vcf\\.bz2$", "")
+  String original_vcf_name = sub(name_without_bz2, "\\.vcf$", "")
 
   call split_vcf {
     input:
@@ -23,7 +29,7 @@ workflow scatter_vcf {
   call concat_csv {
     input:
       csv_files = VariantEffectPredictorTask.output_file,
-      original_vcf_name = basename(vcf, ".vcf")
+      original_vcf_name = original_vcf_name
   }
 
   output {
@@ -38,6 +44,7 @@ task split_vcf {
   }
 
   String output_prefix = "split_vcf_output"
+  Int required_disk_size_gb = 3 * ceil(size(vcf, "GB"))
 
   command <<<
     apt-get update && apt-get install -y bcftools
@@ -86,7 +93,7 @@ if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
 vcf_extension = 'vcf.gz' if vcf_file.endswith('.gz') else 'vcf'
-output_prefix = output_prefix if output_prefix else os.path.basename(vcf_file).replace('.vcf', '').replace('.gz', '')
+output_prefix = output_prefix if output_prefix else os.path.basename(vcf_file).replace('.vcf', '').replace('.gz', '').replace('.bz2', '')
 
 num_variants = count_variants(vcf_file)
 split_sizes = distribute_items(num_variants, num_splits)
@@ -103,7 +110,10 @@ CODE
   }
 
   runtime {
+    cpu: "16"
+    memory: "32 GB"
     docker: "python:3.8-slim"
+    disks: "local-disk ${required_disk_size_gb} HDD"
   }
 
 }
@@ -114,8 +124,11 @@ task VariantEffectPredictorTask {
     File? vcfindexfile
     String output_filename
     Array[String] cli_arguments = ["--everything"]
-    String vep_docker_image = "us-docker.pkg.dev/broad-dsde-methods/exomiser/vep:r112_human_hg38"
+    #String vep_docker_image = "us-docker.pkg.dev/broad-dsde-methods/exomiser/vep:r112_human_hg38"
+    String vep_docker_image = "vep"
   }
+
+  Int required_disk_size_gb = 3 * ceil(size(vcffile, "GB"))
 
   command <<<
     # ;; syntax=shell
@@ -143,7 +156,7 @@ task VariantEffectPredictorTask {
     cpu: "16"
     memory: "32 GB"
     docker: "~{vep_docker_image}"
-    disks: "local-disk 256 HDD"
+    disks: "local-disk ${required_disk_size_gb} HDD"
   }
 }
 
@@ -156,6 +169,8 @@ task concat_csv {
   File csv_file_list = write_lines(csv_files)
   String concatenated_csv = "${original_vcf_name}_final.csv"
 
+  Int required_disk_size_gb = 3 * ceil(size(csv_files, "GB"))
+
   command <<<
     python3 <<CODE
 import sys
@@ -165,8 +180,13 @@ def concat_csv(file_list, output_file):
     with open(output_file, 'w') as outfile:
         for file in file_list:
             with open(file, 'r') as infile:
-                header = infile.readline()
+                for line in infile:
+                    if not line.startswith('## '):
+                      break
+                header = line
                 if not header_written:
+                    while header[0] == '#':
+                        header = header[1:]
                     outfile.write(header)
                     header_written = True
                 for line in infile:
@@ -188,6 +208,8 @@ CODE
   }
 
   runtime {
+    memory: "8 GB"
     docker: "python:3.8-slim"
+    disks: "local-disk ${required_disk_size_gb} HDD"
   }
 }
